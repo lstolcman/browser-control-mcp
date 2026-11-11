@@ -30,7 +30,10 @@ import {
 } from "./singleton-broker";
 
 const WS_DEFAULT_PORT = 8089;
-const EXTENSION_RESPONSE_TIMEOUT_MS = 1000;
+// Default 5 seconds: serializing a large tab list over the extension WebSocket can take
+// well over a second, and the old 1 second default caused "Timed out waiting for response"
+// when calls ran in parallel. Override with BROWSER_CONTROL_MCP_RESPONSE_TIMEOUT_MS (ms).
+const EXTENSION_RESPONSE_TIMEOUT_MS = readResponseTimeoutMs(5000);
 // Capturing may foreground the tab, wait for it to paint, encode the image and transfer a
 // payload orders of magnitude larger than the other responses.
 const SCREENSHOT_RESPONSE_TIMEOUT_MS = 10000;
@@ -500,6 +503,21 @@ export class BrowserAPI {
       }
     );
   }
+}
+
+function readResponseTimeoutMs(defaultMs: number): number {
+  const raw = process.env.BROWSER_CONTROL_MCP_RESPONSE_TIMEOUT_MS;
+  if (raw === undefined) {
+    return defaultMs;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.error(
+      `Invalid BROWSER_CONTROL_MCP_RESPONSE_TIMEOUT_MS="${raw}", using ${defaultMs}ms`
+    );
+    return defaultMs;
+  }
+  return parsed;
 }
 
 function readConfig() {

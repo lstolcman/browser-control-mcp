@@ -7,6 +7,25 @@ import relativeTime from "dayjs/plugin/relativeTime";
 
 dayjs.extend(relativeTime);
 
+// Default cap for get-list-of-open-tabs. 0 means no limit (return all tabs).
+// Override with BROWSER_CONTROL_MCP_TABS_LIMIT.
+const DEFAULT_TABS_LIMIT = readTabsLimit();
+
+function readTabsLimit(): number {
+  const raw = process.env.BROWSER_CONTROL_MCP_TABS_LIMIT;
+  if (raw === undefined) {
+    return 0;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.error(
+      `Invalid BROWSER_CONTROL_MCP_TABS_LIMIT="${raw}", using 0 (no limit)`
+    );
+    return 0;
+  }
+  return parsed;
+}
+
 const mcpServer = new McpServer({
   name: "BrowserControl",
   version: "1.5.2",
@@ -49,27 +68,18 @@ mcpServer.tool(
 
 mcpServer.tool(
   "get-list-of-open-tabs",
-  "Get the list of open tabs in the user's browser. Use offset and limit parameters for pagination when there are many tabs.",
+  "Get the list of open tabs in the user's browser. Returns all open tabs; use limit to cap how many are returned.",
   {
-    offset: z.number().int().min(0).default(0).describe("Starting index for pagination (0-based, must be >= 0)"),
-    limit: z.number().default(100).describe("Maximum number of tabs to return (default: 100, max: 500)"),
+    limit: z
+      .number()
+      .int()
+      .min(0)
+      .default(DEFAULT_TABS_LIMIT)
+      .describe("Maximum number of tabs to return (0 = no limit, returns all tabs)"),
   },
-  async ({ offset, limit }) => {
-    // Validate and cap the limit
-    const effectiveLimit = Math.min(Math.max(1, limit), 500);
-
+  async ({ limit }) => {
     const openTabs = await browserApi.getTabList();
-    const totalTabs = openTabs.length;
-
-    // Apply pagination
-    const paginatedTabs = openTabs.slice(offset, offset + effectiveLimit);
-    const hasMore = offset + effectiveLimit < totalTabs;
-
-    // Add pagination info as the first content item
-    const paginationInfo = {
-      type: "text" as const,
-      text: `Showing tabs ${offset + 1}-${offset + paginatedTabs.length} of ${totalTabs} total tabs${hasMore ? ` (use offset=${offset + effectiveLimit} to see more)` : ''}`,
-    };
+    const paginatedTabs = limit > 0 ? openTabs.slice(0, limit) : openTabs;
 
     const tabContent = paginatedTabs.map((tab) => {
       let lastAccessed = "unknown";
@@ -82,8 +92,13 @@ mcpServer.tool(
       };
     });
 
+    const summary =
+      limit > 0
+        ? `${paginatedTabs.length} of ${openTabs.length} open tabs`
+        : `${openTabs.length} open tabs`;
+
     return {
-      content: [paginationInfo, ...tabContent],
+      content: [{ type: "text", text: summary }, ...tabContent],
     };
   }
 );
