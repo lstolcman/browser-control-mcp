@@ -88,7 +88,7 @@ mcpServer.tool(
       }
       return {
         type: "text" as const,
-        text: `tab id=${tab.id}, tab url=${tab.url}, tab title=${tab.title}, last accessed=${lastAccessed}`,
+        text: `id=${tab.id}, url=${tab.url}, title=${tab.title}, last accessed=${lastAccessed}`,
       };
     });
 
