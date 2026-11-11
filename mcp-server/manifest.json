@@ -30,7 +30,8 @@
             ],
             "env": {
                 "EXTENSION_SECRET": "${user_config.extension_secret}",
-                "EXTENSION_PORT": "${user_config.port}"
+                "EXTENSION_PORT": "${user_config.port}",
+                "BROWSER_CONTROL_MCP_STRIP_TRACKING": "${user_config.strip_tracking}"
             }
         }
     },
@@ -47,6 +48,13 @@
             "title": "Extension Port",
             "description": "The port that the MCP server will use to communicate with the Firefox extension (default is 8089)",
             "default": "8089",
+            "required": false
+        },
+        "strip_tracking": {
+            "type": "boolean",
+            "title": "Strip tracking parameters from URLs",
+            "description": "Remove tracking query parameters (utm_*, fbclid, gclid and the other parameters Firefox removes in \"Copy Link Without Site Tracking\") from tab, history and page-link URLs before they are shown to the assistant. Turn off to pass URLs through unchanged.",
+            "default": true,
             "required": false
         }
     },

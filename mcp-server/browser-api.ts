@@ -28,6 +28,7 @@ import {
   removeBrokerSocket,
   writeBrokerInfo,
 } from "./singleton-broker";
+import { stripUrlForAgent } from "./strip-tracking";
 
 const WS_DEFAULT_PORT = 8089;
 // Default 5 seconds: serializing a large tab list over the extension WebSocket can take
@@ -297,7 +298,12 @@ export class BrowserAPI {
 
   async getTabList(): Promise<BrowserTab[]> {
     const message = await this.requestExtension({ cmd: "get-tab-list" }, "tabs");
-    return message.tabs;
+    // Tracking parameters are dropped here, the single point every tab URL
+    // passes through, so the assistant never sees them.
+    return message.tabs.map((tab) => ({
+      ...tab,
+      url: stripUrlForAgent(tab.url),
+    }));
   }
 
   async getBrowserRecentHistory(
@@ -307,17 +313,27 @@ export class BrowserAPI {
       { cmd: "get-browser-recent-history", searchQuery },
       "history"
     );
-    return message.historyItems;
+    return message.historyItems.map((item) => ({
+      ...item,
+      url: stripUrlForAgent(item.url),
+    }));
   }
 
   async getTabContent(
     tabId: number,
     offset: number
   ): Promise<TabContentExtensionMessage> {
-    return await this.requestExtension(
+    const message = await this.requestExtension(
       { cmd: "get-tab-content", tabId, offset },
       "tab-content"
     );
+    return {
+      ...message,
+      links: message.links.map((link) => ({
+        ...link,
+        url: stripUrlForAgent(link.url) ?? link.url,
+      })),
+    };
   }
 
   async reorderTabs(tabOrder: number[]): Promise<number[]> {

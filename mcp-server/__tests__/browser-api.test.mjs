@@ -16,7 +16,7 @@ const { BrowserAPI } = browserApi;
 test("a second BrowserAPI forwards requests through the first instance", async () => {
   await withConnectedApis(async ({ follower }) => {
     assert.deepEqual(await follower.getTabList(), [
-      { id: 42, url: "https://example.com", title: "Example" },
+      { id: 42, url: "https://example.com?page=2", title: "Example" },
     ]);
   });
 });
@@ -26,7 +26,7 @@ test("a follower forwards every browser command", async () => {
     assert.equal(await follower.openTab("https://example.com/new"), 7);
     await follower.closeTabs([42]);
     assert.deepEqual(await follower.getBrowserRecentHistory("search"), [
-      { url: "https://example.com/history", title: "History" },
+      { url: "https://example.com/history?q=rust", title: "History" },
     ]);
     const tabContent = await follower.getTabContent(42, 5);
     assert.deepEqual({ ...tabContent, correlationId: "ignored" }, {
@@ -36,7 +36,7 @@ test("a follower forwards every browser command", async () => {
       fullText: "page text",
       isTruncated: false,
       totalLength: 9,
-      links: [],
+      links: [{ url: "https://example.com/a?id=1", text: "A" }],
     });
     assert.deepEqual(await follower.reorderTabs([42, 7]), [7, 42]);
     assert.equal(await follower.findHighlight(42, "needle"), 2);
@@ -111,7 +111,7 @@ test("stale responses after a timeout are dropped without crashing", async () =>
 
     // The server must still be alive and responsive.
     assert.deepEqual(await api.getTabList(), [
-      { id: 42, url: "https://example.com", title: "Example" },
+      { id: 42, url: "https://example.com?page=2", title: "Example" },
     ]);
   } finally {
     await closeWebSocket(extension);
@@ -203,7 +203,7 @@ test("a follower takes ownership after the leader closes", async () => {
     ]);
     extension = reconnectedExtension;
     assert.deepEqual(tabs, [
-      { id: 42, url: "https://example.com", title: "Example" },
+      { id: 42, url: "https://example.com?page=2", title: "Example" },
     ]);
   } finally {
     await closeWebSocket(extension);
@@ -341,14 +341,25 @@ function responseFor(request) {
       return {
         resource: "tabs",
         correlationId: request.correlationId,
-        tabs: [{ id: 42, url: "https://example.com", title: "Example" }],
+        tabs: [
+          {
+            id: 42,
+            url: "https://example.com?utm_source=newsletter&fbclid=abc&page=2",
+            title: "Example",
+          },
+        ],
       };
     case "get-browser-recent-history":
       assert.equal(request.searchQuery, "search");
       return {
         resource: "history",
         correlationId: request.correlationId,
-        historyItems: [{ url: "https://example.com/history", title: "History" }],
+        historyItems: [
+          {
+            url: "https://example.com/history?utm_campaign=spring&q=rust",
+            title: "History",
+          },
+        ],
       };
     case "get-tab-content":
       assert.equal(request.tabId, 42);
@@ -360,7 +371,7 @@ function responseFor(request) {
         fullText: "page text",
         isTruncated: false,
         totalLength: 9,
-        links: [],
+        links: [{ url: "https://example.com/a?utm_source=x&id=1", text: "A" }],
       };
     case "reorder-tabs":
       assert.deepEqual(request.tabOrder, [42, 7]);

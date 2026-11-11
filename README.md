@@ -42,10 +42,33 @@ The MCP server and Firefox extension combo is designed to be more secure than we
 * Screenshots require the user to authorize each individual tab by clicking the extension's toolbar button. The extension relies on the `activeTab` permission for this, so the authorization is enforced by Firefox itself and expires when the tab navigates or closes. The extension never requests broad host permissions for screenshots.
 * It uses a local-only connection with a shared secret between the MCP server and extension.
 * No remote data collection or tracking.
+* URLs reported to the assistant have tracking parameters stripped first, using the same rules as Firefox's "Copy Link Without Site Tracking".
 * It provides an extension-side audit log for tool calls and tool enable/disable configuration.
 * The extension includes no runtime third-party dependencies.
 
 **Important note**: Browser Control MCP is still experimental. Use at your own risk. You should practice caution as with any other MCP server and authorize/monitor tool calls carefully.
+
+## Tracking parameters in URLs
+
+URLs reported for tabs, history and page links are cleaned before they reach the assistant: tracking query parameters (`utm_*`, `fbclid`, `gclid`, `mc_eid`, `igshid`, ...) are removed, following the rules Firefox uses for its "Copy Link Without Site Tracking" action. Everything else — other parameters, their order, duplicates and any `#fragment` — is passed through byte for byte.
+
+The rules are a bundled snapshot of Mozilla's `StripOnShare` lists (MPL-2.0 and LGPL-3.0) plus the ETP `query-stripping` list, stored in `mcp-server/strip-tracking-data.ts`. A few parameters that are functional rather than tracking (Amazon's `keywords`, TikTok's `q`, Flipkart's `iid`, ...) are deliberately kept so that a link handed back to `open-browser-tab` still works; they are listed in `KEPT_FUNCTIONAL_PARAMS`. Signed URLs and hosts on Firefox's allow list are never modified.
+
+Cleaning happens in the MCP server, so the raw URLs still travel over the local WebSocket connection between the browser and the server; nothing leaves the machine.
+
+To disable it, set `BROWSER_CONTROL_MCP_STRIP_TRACKING=0`, or clear the "Strip tracking parameters from URLs" checkbox in the desktop extension's configuration.
+
+### How this differs from Firefox's "Copy Link Without Site Tracking"
+
+The rules come from the same data Firefox uses, but this is not a byte-for-byte copy of that feature, because it runs in a different place. Three deliberate differences:
+
+| | Firefox | Here |
+|---|---|---|
+| Functional parameters | Stripped too (`keywords`, `q`, `iid`, `store`, `loc`, `pos`, `dchild`, `field-lbr_brands_browse-bin`) | **Kept**, so a link handed back to `open-browser-tab` still opens the right page. A copied link is pasted once by a human; here the assistant may follow it. Listed in `KEPT_FUNCTIONAL_PARAMS`. |
+| Which site's rules apply | The top-level page you are on. Copying a link on amazon.com applies Amazon's rules, whatever the link points at. | The URL's own host. The server has no page context for tab and history URLs, and the host is what the rules are really about. |
+| When it runs | On the copy action, in the browser. | When the URL is reported to the assistant, in the MCP server. History and tab lists therefore come back clean retroactively, but the raw URL still crosses the local socket. |
+
+Two smaller additions: URLs carrying a signature (`X-Amz-Signature`, `Sig`, `Hmac`, ...) are passed through untouched, since removing any parameter would invalidate them; a host is matched with and without its `www.` prefix. Like Firefox, parameters are matched by name only, so a URL embedded inside another parameter (e.g. `dd_referrer=...utm_source%3D...`) is left as-is.
 
 ## Installation
 
