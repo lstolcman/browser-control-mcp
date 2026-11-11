@@ -52,6 +52,75 @@ test("a follower forwards every browser command", async () => {
   });
 });
 
+test("stale responses after a timeout are dropped without crashing", async () => {
+  const port = await getFreePort();
+  const secret = `secret-${port}`;
+  const cacheDirectory = createCacheDirectory();
+  const previousEnvironment = setEnvironment({
+    EXTENSION_PORT: String(port),
+    EXTENSION_SECRET: secret,
+    XDG_CACHE_HOME: cacheDirectory,
+    BROWSER_CONTROL_MCP_RESPONSE_TIMEOUT_MS: "150",
+  });
+  const api = new BrowserAPI();
+  let extension;
+
+  try {
+    await api.init();
+    extension = new WebSocket(`ws://127.0.0.1:${port}`);
+    let pendingRequest;
+    let skipResponse = true;
+    extension.on("message", (rawMessage) => {
+      const request = JSON.parse(rawMessage.toString());
+      pendingRequest = request.payload;
+      if (skipResponse) {
+        // Swallow the first request so it times out.
+        skipResponse = false;
+        return;
+      }
+      const payload = responseFor(request.payload);
+      extension.send(
+        JSON.stringify({ payload, signature: sign(payload, secret) })
+      );
+    });
+    await new Promise((resolve, reject) => {
+      extension.once("open", resolve);
+      extension.once("error", reject);
+    });
+
+    await assert.rejects(api.getTabList(), /Timed out waiting for response/);
+
+    // Deliver a stale response and a stale error for the timed-out
+    // correlationId. Before the fix, the first message threw a TypeError in
+    // the WebSocket handler and killed the process.
+    const stale = {
+      resource: "tabs",
+      correlationId: pendingRequest.correlationId,
+      tabs: [],
+    };
+    extension.send(
+      JSON.stringify({ payload: stale, signature: sign(stale, secret) })
+    );
+    extension.send(
+      JSON.stringify({
+        correlationId: pendingRequest.correlationId,
+        errorMessage: "stale",
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The server must still be alive and responsive.
+    assert.deepEqual(await api.getTabList(), [
+      { id: 42, url: "https://example.com", title: "Example" },
+    ]);
+  } finally {
+    await closeWebSocket(extension);
+    await api.close();
+    restoreEnvironment(previousEnvironment);
+    fs.rmSync(cacheDirectory, { recursive: true, force: true });
+  }
+});
+
 test("BrowserAPI waits for a broker that is still starting", async () => {
   const port = await getFreePort();
   const secret = `secret-${port}`;

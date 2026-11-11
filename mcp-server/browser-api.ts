@@ -33,7 +33,7 @@ const WS_DEFAULT_PORT = 8089;
 // Default 5 seconds: serializing a large tab list over the extension WebSocket can take
 // well over a second, and the old 1 second default caused "Timed out waiting for response"
 // when calls ran in parallel. Override with BROWSER_CONTROL_MCP_RESPONSE_TIMEOUT_MS (ms).
-const EXTENSION_RESPONSE_TIMEOUT_MS = readResponseTimeoutMs(5000);
+const DEFAULT_EXTENSION_RESPONSE_TIMEOUT_MS = 5000;
 // Capturing may foreground the tab, wait for it to paint, encode the image and transfer a
 // payload orders of magnitude larger than the other responses.
 const SCREENSHOT_RESPONSE_TIMEOUT_MS = 10000;
@@ -397,7 +397,9 @@ export class BrowserAPI {
   private async requestExtension<T extends ExtensionMessage["resource"]>(
     message: ServerMessage,
     resource: T,
-    timeoutMs: number = EXTENSION_RESPONSE_TIMEOUT_MS,
+    timeoutMs: number = readResponseTimeoutMs(
+      DEFAULT_EXTENSION_RESPONSE_TIMEOUT_MS
+    ),
     allowRecovery: boolean = true
   ): Promise<Extract<ExtensionMessage, { resource: T }>> {
     if (!this.brokerServer) {
@@ -468,7 +470,16 @@ export class BrowserAPI {
 
   private handleDecodedExtensionMessage(decoded: ExtensionMessage) {
     const { correlationId } = decoded;
-    const { resolve, resource } = this.extensionRequestMap.get(correlationId)!;
+    const pending = this.extensionRequestMap.get(correlationId);
+    if (!pending) {
+      // The request already timed out and its resolver was cleaned up. Drop the
+      // stale response instead of crashing the server on the missing entry.
+      console.error(
+        `Dropping stale extension response for correlationId ${correlationId} (${decoded.resource})`
+      );
+      return;
+    }
+    const { resolve, resource } = pending;
     if (resource !== decoded.resource) {
       console.error("Resource mismatch:", resource, decoded.resource);
       return;
@@ -479,7 +490,14 @@ export class BrowserAPI {
 
   private handleExtensionError(decoded: ExtensionError) {
     const { correlationId, errorMessage } = decoded;
-    const { reject } = this.extensionRequestMap.get(correlationId)!;
+    const pending = this.extensionRequestMap.get(correlationId);
+    if (!pending) {
+      console.error(
+        `Dropping stale extension error for correlationId ${correlationId}: ${errorMessage}`
+      );
+      return;
+    }
+    const { reject } = pending;
     this.extensionRequestMap.delete(correlationId);
     reject(errorMessage);
   }
@@ -487,7 +505,9 @@ export class BrowserAPI {
   private async waitForResponse<T extends ExtensionMessage["resource"]>(
     correlationId: string,
     resource: T,
-    timeoutMs: number = EXTENSION_RESPONSE_TIMEOUT_MS
+    timeoutMs: number = readResponseTimeoutMs(
+      DEFAULT_EXTENSION_RESPONSE_TIMEOUT_MS
+    )
   ): Promise<Extract<ExtensionMessage, { resource: T }>> {
     return new Promise<Extract<ExtensionMessage, { resource: T }>>(
       (resolve, reject) => {
